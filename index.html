@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SART – jsPsych Tablet Version (3 & 8 No-Go)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- jsPsych core & CSS from CDN -->
+  <link href="https://unpkg.com/jspsych@7.3.0/dist/css/jspsych.css" rel="stylesheet" type="text/css" />
+  <script src="https://unpkg.com/jspsych@7.3.0/dist/jspsych.js"></script>
+
+  <!-- Plugins -->
+  <script src="https://unpkg.com/jspsych@7.3.0/dist/plugins/jspsych-html-button-response.js"></script>
+  <script src="https://unpkg.com/jspsych@7.3.0/dist/plugins/jspsych-instructions.js"></script>
+  <script src="https://unpkg.com/jspsych@7.3.0/dist/plugins/jspsych-fullscreen.js"></script>
+
+  <style>
+    /* Invisible full-screen button = tap anywhere */
+    .jspsych-btn {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      opacity: 0;               /* invisible */
+      border: none;
+      background: transparent;
+    }
+
+    /* Centered digit text */
+    .sart-digit {
+      font-size: 80px;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 30vh;
+    }
+
+    body {
+      background-color: #f0f0f0;
+      touch-action: manipulation;   /* smoother taps on mobile/tablet */
+    }
+  </style>
+</head>
+
+<body></body>
+
+<script>
+  // ------------------------------
+  // BASIC CONFIG
+  // ------------------------------
+  const N_TRIALS = 500;            // total SART trials (main block)
+  const DIGITS = [1,2,3,4,5,6,7,8,9];
+  const NOGO_DIGITS = [3, 8];      // your No-Go digits
+  const STIMULUS_DURATION = 250;   // ms digit visible
+  const TRIAL_DURATION = 1000;     // total per trial (incl. blank)
+
+  // ------------------------------
+  // INIT jsPsych
+  // ------------------------------
+  const jsPsych = initJsPsych({
+    on_finish: function() {
+      const trials = jsPsych.data.get().filter({task: 'sart_trial', block_type: 'main'});
+      const n = trials.count();
+      const commission = trials.filter({commission_error: 1}).count();
+      const omission   = trials.filter({omission_error: 1}).count();
+      const rt_data    = trials.filterCustom(t => t.correct_response === 1 && t.rt !== null).select('rt');
+      const meanRT     = rt_data.mean();
+      const sdRT       = rt_data.sd();
+
+      let summary = `
+        Total main trials: ${n}<br>
+        Commission errors (No-Go tapped): ${commission}<br>
+        Omission errors (Go missed): ${omission}<br>
+        Mean RT (ms, correct Go): ${Math.round(meanRT || 0)}<br>
+        RT SD (ms, correct Go): ${Math.round(sdRT || 0)}<br><br>
+        A CSV file with detailed trial data should start downloading automatically.
+      `;
+
+      document.body.innerHTML = "<div style='padding:20px; font-size:18px;'>" +
+        "<h2>Task complete – Thank you!</h2>" + summary + "</div>";
+
+      // Download full data as CSV
+      jsPsych.data.get().localSave('csv', 'sart_3_8_data.csv');
+      console.log("SART summary:", {n, commission, omission, meanRT, sdRT});
+    }
+  });
+
+  let timeline = [];
+
+  // ------------------------------
+  // FULLSCREEN (better on tablet)
+  // ------------------------------
+  timeline.push({
+    type: jsPsychFullscreen,
+    fullscreen_mode: true
+  });
+
+  // ------------------------------
+  // INSTRUCTIONS
+  // ------------------------------
+  const instructions = {
+    type: jsPsychInstructions,
+    pages: [
+      `<p style="font-size:20px;">
+        You will see digits (1–9) appear on the screen, one after another.
+      </p>
+      <p style="font-size:20px;">
+        <strong>Tap anywhere on the screen for every digit</strong><br>
+        <strong>EXCEPT when the digit is <span style="color:red;">3</span> or <span style="color:red;">8</span>.</strong>
+      </p>
+      <p style="font-size:20px;">
+        So:<br>
+        Tap for 1, 2, 4, 5, 6, 7, 9.<br>
+        Do NOT tap for 3 or 8.
+      </p>
+      <p style="font-size:20px;">
+        Please respond as quickly and accurately as possible.<br>
+        Try to keep your attention on the task the whole time.
+      </p>`,
+      `<p style="font-size:20px;">
+        First you will do a short practice.<br><br>
+        Put the tablet on a table or hold it comfortably,<br>
+        and use your thumb or finger to tap the screen.
+      </p>
+      <p style="font-size:20px;">
+        Tap <strong>Next</strong> to start the practice trials.
+      </p>`
+    ],
+    show_clickable_nav: true,
+    button_label_next: 'Next',
+    button_label_previous: 'Back'
+  };
+  timeline.push(instructions);
+
+  // ------------------------------
+  // FUNCTION TO CREATE TRIALS
+  // ------------------------------
+  function makeTrials(nTrials, label) {
+    let trialDefs = [];
+    for (let i = 0; i < nTrials; i++) {
+      const digit = jsPsych.randomization.sampleWithoutReplacement(DIGITS, 1)[0];
+      const isNoGo = NOGO_DIGITS.includes(digit);
+
+      trialDefs.push({
+        type: jsPsychHtmlButtonResponse,
+        stimulus: `<div class="sart-digit">${digit}</div>`,
+        choices: ['tap'],                 // label irrelevant – button covers whole screen
+        stimulus_duration: STIMULUS_DURATION,
+        trial_duration: TRIAL_DURATION,
+        data: {
+          task: 'sart_trial',
+          block_type: label,
+          digit: digit,
+          is_nogo: isNoGo
+        },
+        on_finish: function(data) {
+          const tapped = data.response !== null;  // clicked/tapped?
+          let commission = 0;
+          let omission   = 0;
+          let correct    = 0;
+
+          if (data.is_nogo) {
+            // No-Go digit: should NOT tap
+            if (tapped) {
+              commission = 1;
+              correct = 0;
+            } else {
+              correct = 1;
+            }
+          } else {
+            // Go digit: should tap
+            if (!tapped) {
+              omission = 1;
+              correct = 0;
+            } else {
+              correct = 1;
+            }
+          }
+          data.commission_error = commission;
+          data.omission_error   = omission;
+          data.correct_response = correct;
+        }
+      });
+    }
+    return trialDefs;
+  }
+
+  // ------------------------------
+  // PRACTICE BLOCK (20 trials)
+  // ------------------------------
+  const practice_block = {
+    timeline: makeTrials(20, 'practice')
+  };
+  timeline.push(practice_block);
+
+  const practice_end = {
+    type: jsPsychInstructions,
+    pages: [
+      `<p style="font-size:20px;">
+        Practice is over. Now the real task will begin.
+      </p>
+      <p style="font-size:20px;">
+        Remember:<br>
+        Tap for 1, 2, 4, 5, 6, 7, 9.<br>
+        Do NOT tap for 3 or 8.
+      </p>
+      <p style="font-size:20px;">
+        Try to stay focused the whole time.<br>
+        Tap <strong>Start</strong> when you are ready.
+      </p>`
+    ],
+    show_clickable_nav: true,
+    button_label_next: 'Start',
+    button_label_previous: 'Back'
+  };
+  timeline.push(practice_end);
+
+  // ------------------------------
+  // MAIN SART BLOCK
+  // ------------------------------
+  const main_sart = {
+    timeline: makeTrials(N_TRIALS, 'main')
+  };
+  timeline.push(main_sart);
+
+  // ------------------------------
+  // RUN EXPERIMENT
+  // ------------------------------
+  jsPsych.run(timeline);
+</script>
+</html>
