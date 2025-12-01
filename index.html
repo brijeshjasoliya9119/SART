@@ -24,7 +24,13 @@
       text-align: center;
       margin-top: 30vh;
     }
-    /* full-screen invisible button = tap anywhere */
+    .circle-mask {
+      font-size: 120px;
+      text-align: center;
+      margin-top: 28vh;
+      font-weight: bold;
+    }
+    /* full-screen invisible button for tap */
     .jspsych-btn {
       position: fixed;
       top: 0;
@@ -43,10 +49,14 @@
 <script>
   // ---------- BASIC CONFIG ----------
   var DIGITS = [1,2,3,4,5,6,7,8,9];
-  var NOGO   = [3,8];        // your No-Go digits
-  var N_TRIALS_MAIN = 50;    // keep small for testing; later you can make 300–500
-  var STIM_TIME  = 250;      // ms stimulus visible
-  var TRIAL_TIME = 1000;     // total ms per trial (stim + blank)
+  var NOGO   = [3,8];        // No-Go digits
+
+  // For testing: 40 trials (later make 225–450)
+  var N_TRIALS_MAIN = 40;
+
+  // PsyToolkit timings
+  var DIGIT_TIME  = 250;     // ms digit visible
+  var CIRCLE_TIME = 900;     // ms circle visible (response window)
 
   var timeline = [];
 
@@ -54,11 +64,12 @@
   var instructions = {
     type: 'instructions',
     pages: [
-      "<p style='font-size:20px;'>You will see digits (1–9) one after another on the screen.</p>" +
-      "<p style='font-size:20px;'><strong>Tap anywhere on the screen for every digit</strong><br>" +
-      "<strong>EXCEPT when the digit is <span style=\"color:red;\">3</span> or <span style=\"color:red;\">8</span>.</strong></p>" +
-      "<p style='font-size:20px;'>So: Tap for 1, 2, 4, 5, 6, 7, 9.<br>Do NOT tap for 3 or 8.</p>" +
-      "<p style='font-size:20px;'>Try to respond quickly and accurately.</p>"
+      "<p style='font-size:20px;'>You will see digits from 1–9. Each digit appears very briefly.</p>" +
+      "<p style='font-size:20px;'>After every digit, a <strong>circle</strong> will appear.</p>" +
+      "<p style='font-size:20px;'><strong>TAP the screen during the circle</strong> for all digits<br>" +
+      "<strong>EXCEPT when the digit was <span style='color:red;'>3</span> or <span style='color:red;'>8</span>.</strong></p>" +
+      "<p style='font-size:20px;'>Digit = 250 ms<br>Circle = 900 ms</p>" +
+      "<p style='font-size:20px;'>Try to be fast and accurate.</p>"
     ],
     show_clickable_nav: true,
     button_label_next: 'Start'
@@ -68,48 +79,71 @@
   // ---------- TRIAL GENERATOR ----------
   function make_trials(n, block_label) {
     var trials = [];
+
     for (var i = 0; i < n; i++) {
       var d = jsPsych.randomization.sampleWithoutReplacement(DIGITS, 1)[0];
       var is_nogo = NOGO.indexOf(d) > -1;
 
-      var t = {
+      // 1) DIGIT (250 ms)
+      var digit_trial = {
         type: 'html-button-response',
         stimulus: "<div class='sart-digit'>" + d + "</div>",
-        choices: ['tap'],              // 1 invisible button over full screen
-        stimulus_duration: STIM_TIME,
-        trial_duration: TRIAL_TIME,
+        choices: ['tap'],
+        stimulus_duration: DIGIT_TIME,
+        trial_duration: DIGIT_TIME,
+        response_ends_trial: false,
         data: {
           task: 'sart',
+          part: 'digit',
+          block: block_label,
+          digit: d,
+          is_nogo: is_nogo
+        }
+      };
+
+      // 2) CIRCLE (900 ms) → RESPONSE WINDOW
+      var circle_trial = {
+        type: 'html-button-response',
+        stimulus: "<div class='circle-mask'>&#9711;</div>",   // hollow circle ring
+        choices: ['tap'],
+        stimulus_duration: CIRCLE_TIME,
+        trial_duration: CIRCLE_TIME,
+        response_ends_trial: false,
+        data: {
+          task: 'sart',
+          part: 'circle',
           block: block_label,
           digit: d,
           is_nogo: is_nogo
         },
         on_finish: function(data){
-          var tapped = (data.response !== null);  // button index or null
+          var tapped = (data.response !== null);
           var comm = 0;
           var omis = 0;
           var corr = 0;
 
           if (data.is_nogo) {
-            // No-Go: should NOT tap
-            if (tapped) { comm = 1; corr = 0; }
+            if (tapped) { comm = 1; }
             else        { corr = 1; }
           } else {
-            // Go: should tap
-            if (!tapped){ omis = 1; corr = 0; }
+            if (!tapped){ omis = 1; }
             else        { corr = 1; }
           }
+
           data.commission_error = comm;
           data.omission_error   = omis;
           data.correct_response = corr;
         }
       };
-      trials.push(t);
+
+      trials.push(digit_trial);
+      trials.push(circle_trial);
     }
+
     return trials;
   }
 
-  // ---------- PRACTICE (10) + MAIN (50) ----------
+  // ---------- PRACTICE (10 digits) + MAIN (40 digits) ----------
   timeline = timeline.concat(make_trials(10, 'practice'));
   timeline = timeline.concat(make_trials(N_TRIALS_MAIN, 'main'));
 
@@ -117,9 +151,8 @@
   jsPsych.init({
     timeline: timeline,
     on_finish: function() {
-      // download CSV
-      jsPsych.data.get().localSave('csv', 'sart_3_8_data.csv');
-      // simple thank-you screen
+      var circle_data = jsPsych.data.get().filter({task: 'sart', part: 'circle'});
+      circle_data.localSave('csv', 'sart_psytoolkit_style_3_8.csv');
       document.body.innerHTML = "<h2 style='padding:20px;'>Task finished. Thank you!</h2>";
     }
   });
